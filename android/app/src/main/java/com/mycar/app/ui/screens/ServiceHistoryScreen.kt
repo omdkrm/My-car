@@ -1,0 +1,1021 @@
+package com.mycar.app.ui.screens
+
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.dp
+import com.mycar.app.data.model.CatalogData
+import com.mycar.app.data.model.ReminderIntervalType
+import com.mycar.app.data.model.ServiceRecord
+import com.mycar.app.data.model.Vehicle
+import com.mycar.app.data.util.PersianDateHelper
+import com.mycar.app.data.util.PriceFormatter
+import com.mycar.app.ui.components.PersianDatePickerDialog
+import kotlinx.coroutines.launch
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ServiceHistoryScreen(
+    activeVehicle: Vehicle?,
+    services: List<ServiceRecord>,
+    onAddService: (String, String, String?, String, Int, Long, Long, Long, Long, String, String, String, String) -> Unit,
+    onUpdateService: (ServiceRecord) -> Unit = {},
+    onDeleteService: (ServiceRecord) -> Unit,
+    onAddServiceWithReminder: ((String, String, String?, String, Int, Long, Long, Long, Long, String, String, String, String, ReminderIntervalType, Int, Int) -> Unit)? = null,
+    onUpdateServiceWithReminder: ((ServiceRecord, ReminderIntervalType, Int, Int) -> Unit)? = null
+) {
+    var showDialog by remember { mutableStateOf(false) }
+    var serviceToEdit by remember { mutableStateOf<ServiceRecord?>(null) }
+    val snackbarHostState = remember { SnackbarHostState() }
+    val coroutineScope = rememberCoroutineScope()
+
+    Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
+        floatingActionButton = {
+            if (activeVehicle != null) {
+                FloatingActionButton(
+                    onClick = {
+                        serviceToEdit = null
+                        showDialog = true
+                    },
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = Color.White
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = "ثبت سرویس")
+                }
+            }
+        }
+    ) { padding ->
+        if (activeVehicle == null) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "ابتدا یک خودرو را انتخاب یا ثبت کنید.",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        } else if (services.isEmpty()) {
+            EmptyServices(
+                onAddClick = {
+                    serviceToEdit = null
+                    showDialog = true
+                },
+                modifier = Modifier.padding(padding)
+            )
+        } else {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                items(services, key = { it.id }) { service ->
+                    ServiceItemCard(
+                        service = service,
+                        onEdit = {
+                            serviceToEdit = service
+                            showDialog = true
+                        },
+                        onDelete = { onDeleteService(service) }
+                    )
+                }
+            }
+        }
+    }
+
+    if (showDialog && activeVehicle != null) {
+        ServiceFormDialog(
+            initialService = serviceToEdit,
+            defaultMileage = activeVehicle.currentMileage,
+            onDismiss = {
+                showDialog = false
+                serviceToEdit = null
+            },
+            onSave = { partName, catId, cat, km, dateTimestamp, cost, brand, center, notes, intervalType, intervalKm, intervalMonths ->
+                val currentEdit = serviceToEdit
+                if (currentEdit != null) {
+                    val updated = currentEdit.copy(
+                        partName = partName,
+                        catalogItemId = catId,
+                        serviceCategory = cat,
+                        mileage = km,
+                        dateTimestamp = dateTimestamp,
+                        costTotal = cost,
+                        partCost = cost,
+                        laborCost = 0L,
+                        brand = brand,
+                        serviceCenter = center,
+                        notes = notes
+                    )
+                    if (onUpdateServiceWithReminder != null) {
+                        onUpdateServiceWithReminder(updated, intervalType, intervalKm, intervalMonths)
+                    } else {
+                        onUpdateService(updated)
+                    }
+                    coroutineScope.launch {
+                        snackbarHostState.showSnackbar("تغییرات با موفقیت ذخیره شد.")
+                    }
+                } else {
+                    if (onAddServiceWithReminder != null) {
+                        onAddServiceWithReminder(
+                            activeVehicle.id,
+                            partName,
+                            catId,
+                            cat,
+                            km,
+                            dateTimestamp,
+                            cost,
+                            cost,
+                            0L,
+                            brand,
+                            center,
+                            "",
+                            notes,
+                            intervalType,
+                            intervalKm,
+                            intervalMonths
+                        )
+                    } else {
+                        onAddService(
+                            activeVehicle.id,
+                            partName,
+                            catId,
+                            cat,
+                            km,
+                            dateTimestamp,
+                            cost,
+                            cost,
+                            0L,
+                            brand,
+                            center,
+                            "",
+                            notes
+                        )
+                    }
+                    coroutineScope.launch {
+                        snackbarHostState.showSnackbar("سرویس با موفقیت ثبت شد.")
+                    }
+                }
+                showDialog = false
+                serviceToEdit = null
+            }
+        )
+    }
+}
+
+@Composable
+fun EmptyServices(onAddClick: () -> Unit, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Icon(
+            Icons.Default.Build,
+            contentDescription = null,
+            modifier = Modifier.size(64.dp),
+            tint = MaterialTheme.colorScheme.primary
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        Text(
+            text = "هنوز سابقه سرویس ثبت نشده است.",
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onBackground
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = "تعویض روغن، فیلترها، شمع یا تعمیرات خود را ثبت کنید.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.height(20.dp))
+        Button(
+            onClick = onAddClick,
+            shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = Color.White
+            )
+        ) {
+            Icon(Icons.Default.Add, contentDescription = null)
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(text = "ثبت اولین سرویس", fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+@Composable
+fun ServiceItemCard(
+    service: ServiceRecord,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = service.partName,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "تاریخ: ${PersianDateHelper.formatJalali(service.dateTimestamp)} | کیلومتر: ${PriceFormatter.formatWithSeparators(service.mileage)} | هزینه: ${PriceFormatter.formatCostWithUnit(service.costTotal)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (service.brand.isNotBlank() || service.serviceCenter.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "برند: ${service.brand.ifBlank { "نامشخص" }} | تعمیرگاه: ${service.serviceCenter.ifBlank { "-" }}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                if (service.notes.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "توضیحات: ${service.notes}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onEdit) {
+                    Icon(
+                        Icons.Default.Edit,
+                        contentDescription = "ویرایش",
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+                IconButton(onClick = onDelete) {
+                    Icon(
+                        Icons.Default.DeleteOutline,
+                        contentDescription = "حذف سرویس",
+                        tint = MaterialTheme.colorScheme.error
+                    )
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ServiceFormDialog(
+    initialService: ServiceRecord? = null,
+    defaultMileage: Int,
+    onDismiss: () -> Unit,
+    onSave: (
+        partName: String,
+        selectedCatalogId: String?,
+        category: String,
+        mileage: Int,
+        dateTimestamp: Long,
+        costTotal: Long,
+        brand: String,
+        center: String,
+        notes: String,
+        intervalType: ReminderIntervalType,
+        intervalKm: Int,
+        intervalMonths: Int
+    ) -> Unit
+) {
+    val isEditMode = initialService != null
+
+    var partName by remember { mutableStateOf(initialService?.partName ?: "") }
+    var selectedCatalogId by remember {
+        mutableStateOf(
+            initialService?.catalogItemId ?: CatalogData.findExactMatch(initialService?.partName ?: "")?.id
+        )
+    }
+    var category by remember {
+        mutableStateOf(
+            initialService?.serviceCategory?.takeIf { it.isNotBlank() }
+                ?: CatalogData.findById(selectedCatalogId)?.category
+                ?: "سرویس‌های عمومی"
+        )
+    }
+
+    val initialCatalogItem = CatalogData.findById(selectedCatalogId)
+        ?: CatalogData.findExactMatch(initialService?.partName ?: "")
+
+    var intervalType by remember {
+        mutableStateOf(
+            initialCatalogItem?.defaultIntervalType
+                ?: if (initialService?.partName?.contains("بیمه") == true || initialService?.partName?.contains("معاینه") == true) ReminderIntervalType.TIME
+                else ReminderIntervalType.COMBINED
+        )
+    }
+    var intervalKmStr by remember {
+        mutableStateOf(
+            (initialCatalogItem?.defaultKmInterval?.takeIf { it > 0 } ?: 5000).toString()
+        )
+    }
+    var intervalMonthsStr by remember {
+        mutableStateOf(
+            (initialCatalogItem?.defaultTimeIntervalMonths?.takeIf { it > 0 } ?: 12).toString()
+        )
+    }
+    var showDueDatePicker by remember { mutableStateOf(false) }
+
+    var selectedTimestamp by remember {
+        mutableStateOf(initialService?.dateTimestamp ?: System.currentTimeMillis())
+    }
+    var showDatePicker by remember { mutableStateOf(false) }
+    var mileageStr by remember {
+        mutableStateOf((initialService?.mileage ?: defaultMileage).toString())
+    }
+    var costStr by remember {
+        mutableStateOf(
+            initialService?.let { PriceFormatter.formatWithSeparators(it.costTotal) } ?: ""
+        )
+    }
+    var brand by remember { mutableStateOf(initialService?.brand ?: "") }
+    var center by remember { mutableStateOf(initialService?.serviceCenter ?: "") }
+    var notes by remember { mutableStateOf(initialService?.notes ?: "") }
+
+    var partNameError by remember { mutableStateOf<String?>(null) }
+    var dateError by remember { mutableStateOf<String?>(null) }
+
+    // Autocomplete dropdown state
+    var expanded by remember { mutableStateOf(false) }
+    val suggestions = remember(partName) {
+        CatalogData.filterItems(partName)
+    }
+    val showDropdown = expanded && suggestions.isNotEmpty()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = if (isEditMode) "ویرایش هزینه و سرویس" else "ثبت سرویس خودرو",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .padding(vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                // Predefined catalog picker - horizontally scrollable chip row
+                Text(
+                    text = "انتخاب سریع از قطعات و سرویس‌های پرکاربرد:",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                val popularItems = CatalogData.items.take(8)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    popularItems.forEach { item ->
+                        val isSelected = selectedCatalogId == item.id
+                        SuggestionChip(
+                            onClick = {
+                                partName = item.name
+                                selectedCatalogId = item.id
+                                category = item.category
+                                intervalType = item.defaultIntervalType
+                                if (item.defaultKmInterval > 0) intervalKmStr = item.defaultKmInterval.toString()
+                                if (item.defaultTimeIntervalMonths > 0) intervalMonthsStr = item.defaultTimeIntervalMonths.toString()
+                                partNameError = null
+                                expanded = false
+                            },
+                            label = {
+                                Text(
+                                    text = item.name,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    maxLines = 1
+                                )
+                            },
+                            colors = SuggestionChipDefaults.suggestionChipColors(
+                                containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                                labelColor = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+                            ),
+                            border = SuggestionChipDefaults.suggestionChipBorder(
+                                enabled = true,
+                                borderColor = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+                            )
+                        )
+                    }
+                }
+
+                // 1. Part / Service Name with Autocomplete Dropdown
+                ExposedDropdownMenuBox(
+                    expanded = showDropdown,
+                    onExpandedChange = { expanded = it },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    OutlinedTextField(
+                        value = partName,
+                        onValueChange = { newText ->
+                            partName = newText
+                            expanded = true
+                            if (newText.isNotBlank()) partNameError = null
+
+                            // State correctness:
+                            // Check if current text still matches the selected catalog item
+                            val currentSelected = CatalogData.findById(selectedCatalogId)
+                            val exactMatch = CatalogData.findExactMatch(newText)
+                            if (exactMatch != null) {
+                                selectedCatalogId = exactMatch.id
+                                category = exactMatch.category
+                                intervalType = exactMatch.defaultIntervalType
+                                if (exactMatch.defaultKmInterval > 0) intervalKmStr = exactMatch.defaultKmInterval.toString()
+                                if (exactMatch.defaultTimeIntervalMonths > 0) intervalMonthsStr = exactMatch.defaultTimeIntervalMonths.toString()
+                            } else if (currentSelected != null &&
+                                CatalogData.normalizeText(currentSelected.name) != CatalogData.normalizeText(newText)
+                            ) {
+                                selectedCatalogId = null
+                            }
+                        },
+                        label = { Text("نام قطعه / سرویس") },
+                        placeholder = { Text("مثال: روغن موتور، لنت ترمز...") },
+                        singleLine = true,
+                        isError = partNameError != null,
+                        supportingText = {
+                            if (partNameError != null) {
+                                Text(partNameError!!, color = MaterialTheme.colorScheme.error)
+                            } else if (selectedCatalogId != null) {
+                                val selectedItem = CatalogData.findById(selectedCatalogId)
+                                if (selectedItem != null) {
+                                    Text(
+                                        text = "دسته‌بندی: ${selectedItem.category}",
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+                        },
+                        trailingIcon = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (partName.isNotBlank()) {
+                                    IconButton(
+                                        onClick = {
+                                            partName = ""
+                                            selectedCatalogId = null
+                                            expanded = true
+                                            partNameError = null
+                                        },
+                                        modifier = Modifier.size(24.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Clear,
+                                            contentDescription = "پاک کردن",
+                                            modifier = Modifier.size(16.dp),
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                                ExposedDropdownMenuDefaults.TrailingIcon(expanded = showDropdown)
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .menuAnchor()
+                    )
+
+                    ExposedDropdownMenu(
+                        expanded = showDropdown,
+                        onDismissRequest = { expanded = false },
+                        modifier = Modifier.heightIn(max = 240.dp)
+                    ) {
+                        suggestions.forEach { item ->
+                            val isItemSelected = selectedCatalogId == item.id ||
+                                (selectedCatalogId == null && CatalogData.normalizeText(item.name) == CatalogData.normalizeText(partName))
+                            DropdownMenuItem(
+                                text = {
+                                    Column(modifier = Modifier.fillMaxWidth()) {
+                                        Text(
+                                            text = item.name,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = if (isItemSelected) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (isItemSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Row(
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = item.category,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            if (item.defaultKmInterval > 0) {
+                                                Text(
+                                                    text = "• هر ${PriceFormatter.formatWithSeparators(item.defaultKmInterval.toLong())} کیلومتر",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.outline
+                                                )
+                                            }
+                                        }
+                                    }
+                                },
+                                trailingIcon = if (isItemSelected) {
+                                    {
+                                        Icon(
+                                            Icons.Default.Check,
+                                            contentDescription = "انتخاب شده",
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                } else null,
+                                onClick = {
+                                    partName = item.name
+                                    selectedCatalogId = item.id
+                                    category = item.category
+                                    intervalType = item.defaultIntervalType
+                                    if (item.defaultKmInterval > 0) intervalKmStr = item.defaultKmInterval.toString()
+                                    if (item.defaultTimeIntervalMonths > 0) intervalMonthsStr = item.defaultTimeIntervalMonths.toString()
+                                    expanded = false
+                                    partNameError = null
+                                },
+                                contentPadding = ExposedDropdownMenuDefaults.ItemContentPadding
+                            )
+                        }
+                    }
+                }
+
+                // 2. Date Field (Persian/Jalali date) - Interactive Tap to Open Calendar
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(4.dp))
+                ) {
+                    OutlinedTextField(
+                        value = PersianDateHelper.formatJalali(selectedTimestamp),
+                        onValueChange = {},
+                        readOnly = true,
+                        enabled = false,
+                        label = { Text("تاریخ") },
+                        placeholder = { Text("مثال: ۱۴۰۳/۰۶/۲۵") },
+                        singleLine = true,
+                        isError = dateError != null,
+                        supportingText = {
+                            if (dateError != null) {
+                                Text(dateError!!, color = MaterialTheme.colorScheme.error)
+                            } else {
+                                Text(
+                                    text = PersianDateHelper.formatJalaliFull(selectedTimestamp),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Default.CalendarToday,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        },
+                        trailingIcon = {
+                            IconButton(onClick = { showDatePicker = true }) {
+                                Icon(
+                                    Icons.Default.DateRange,
+                                    contentDescription = "انتخاب تاریخ از تقویم",
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            disabledTextColor = MaterialTheme.colorScheme.onSurface,
+                            disabledBorderColor = if (dateError != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.outline,
+                            disabledLabelColor = if (dateError != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                            disabledLeadingIconColor = MaterialTheme.colorScheme.primary,
+                            disabledTrailingIconColor = MaterialTheme.colorScheme.primary,
+                            disabledSupportingTextColor = MaterialTheme.colorScheme.onSurfaceVariant
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    // Full-width clickable overlay to capture tap anywhere on the date field
+                    Box(
+                        modifier = Modifier
+                            .matchParentSize()
+                            .clickable { showDatePicker = true }
+                    )
+                }
+
+                // Quick Date Helpers
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    AssistChip(
+                        onClick = {
+                            selectedTimestamp = System.currentTimeMillis()
+                            dateError = null
+                        },
+                        label = { Text("امروز") }
+                    )
+                    AssistChip(
+                        onClick = {
+                            selectedTimestamp = System.currentTimeMillis() - 86400000L
+                            dateError = null
+                        },
+                        label = { Text("دیروز") }
+                    )
+                    AssistChip(
+                        onClick = { showDatePicker = true },
+                        label = { Text("انتخاب از تقویم") },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Default.DateRange,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    )
+                }
+
+                // 3. Mileage at service
+                OutlinedTextField(
+                    value = mileageStr,
+                    onValueChange = { mileageStr = PriceFormatter.toEnglishDigits(it) },
+                    label = {
+                        Text(
+                            if (intervalType == ReminderIntervalType.TIME) "کیلومتر هنگام سرویس (اختیاری برای خدمات زمانی)"
+                            else "کیلومتر هنگام سرویس"
+                        )
+                    },
+                    placeholder = {
+                        if (intervalType == ReminderIntervalType.TIME) Text("در صورت تمایل وارد کنید") else null
+                    },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                // 4. Price / Cost Field (Thousands separators while typing)
+                OutlinedTextField(
+                    value = costStr,
+                    onValueChange = {
+                        costStr = PriceFormatter.formatInputAsYouType(it)
+                    },
+                    label = { Text("هزینه کل (تومان)") },
+                    placeholder = { Text("مثال: ۱۵۰,۰۰۰") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    supportingText = {
+                        val parsed = PriceFormatter.parseCost(costStr)
+                        if (parsed > 0) {
+                            Text(
+                                PriceFormatter.formatCostWithUnit(parsed),
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        } else {
+                            Text("مبلغ به تومان بدون علامت منفی")
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                // Service Reminder Interval Configuration
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+                    ),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.NotificationsActive,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Text(
+                                text = "تنظیم یادآوری دوره بعدی",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+
+                        Text(
+                            text = "نوع یادآوری:",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+
+                        // 4 Types selector
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            val types = listOf(
+                                ReminderIntervalType.COMBINED to "ترکیبی (کیلومتر یا زمان)",
+                                ReminderIntervalType.TIME to "فقط زمانی (بیمه/معاینه)",
+                                ReminderIntervalType.MILEAGE to "فقط کیلومتری",
+                                ReminderIntervalType.NONE to "بدون یادآور"
+                            )
+                            types.forEach { (type, label) ->
+                                val isSelected = intervalType == type
+                                FilterChip(
+                                    selected = isSelected,
+                                    onClick = { intervalType = type },
+                                    label = {
+                                        Text(
+                                            text = label,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                        )
+                                    },
+                                    leadingIcon = if (isSelected) {
+                                        {
+                                            Icon(
+                                                Icons.Default.Check,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    } else null
+                                )
+                            }
+                        }
+
+                        // Mileage interval input (for MILEAGE or COMBINED)
+                        if (intervalType == ReminderIntervalType.MILEAGE || intervalType == ReminderIntervalType.COMBINED) {
+                            OutlinedTextField(
+                                value = intervalKmStr,
+                                onValueChange = { intervalKmStr = PriceFormatter.toEnglishDigits(it) },
+                                label = { Text("دوره تکرار کارکرد (کیلومتر)") },
+                                placeholder = { Text("مثال: ۵۰۰۰") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                listOf(5000, 7000, 10000, 20000, 40000).forEach { km ->
+                                    AssistChip(
+                                        onClick = { intervalKmStr = km.toString() },
+                                        label = { Text("${PriceFormatter.formatWithSeparators(km.toLong())} ک.م") }
+                                    )
+                                }
+                            }
+                        }
+
+                        // Time interval input (for TIME or COMBINED)
+                        if (intervalType == ReminderIntervalType.TIME || intervalType == ReminderIntervalType.COMBINED) {
+                            val monthsVal = PriceFormatter.cleanNumericString(intervalMonthsStr).toIntOrNull() ?: 12
+                            val calculatedNextDate = PersianDateHelper.addJalaliMonths(selectedTimestamp, monthsVal)
+
+                            OutlinedTextField(
+                                value = intervalMonthsStr,
+                                onValueChange = { intervalMonthsStr = PriceFormatter.toEnglishDigits(it) },
+                                label = { Text("دوره تکرار زمانی (ماه)") },
+                                placeholder = { Text("مثال: ۱۲") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                listOf(
+                                    3 to "۳ ماه",
+                                    6 to "۶ ماه",
+                                    12 to "۱۲ ماه (۱ سال)",
+                                    24 to "۲۴ ماه (۲ سال)"
+                                ).forEach { (m, label) ->
+                                    AssistChip(
+                                        onClick = { intervalMonthsStr = m.toString() },
+                                        label = { Text(label) }
+                                    )
+                                }
+                            }
+
+                            // Next Due Date Box
+                            Card(
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column {
+                                        Text(
+                                            text = "سررسید موعد بعدی:",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Text(
+                                            text = PersianDateHelper.formatJalali(calculatedNextDate),
+                                            style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                    OutlinedButton(
+                                        onClick = { showDueDatePicker = true },
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.EditCalendar,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("تغییر مستقیم تاریخ", style = MaterialTheme.typography.labelSmall)
+                                    }
+                                }
+                            }
+                        }
+
+                        if (intervalType == ReminderIntervalType.NONE) {
+                            Text(
+                                text = "برای این مورد یادآوری در آینده محاسبه نخواهد شد.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+
+                // 5. Brand
+                OutlinedTextField(
+                    value = brand,
+                    onValueChange = { brand = it },
+                    label = { Text("برند قطعه") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                // 6. Workshop / Service Center
+                OutlinedTextField(
+                    value = center,
+                    onValueChange = { center = it },
+                    label = { Text("نام تعمیرگاه") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                // 7. Description / Notes
+                OutlinedTextField(
+                    value = notes,
+                    onValueChange = { notes = it },
+                    label = { Text("توضیحات") },
+                    placeholder = { Text("مثال: تعویض روغن و فیلتر، بررسی سطح مایعات") },
+                    singleLine = false,
+                    minLines = 2,
+                    maxLines = 4,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    var hasError = false
+                    if (partName.isBlank()) {
+                        partNameError = "نام قطعه یا سرویس نمی‌تواند خالی باشد"
+                        hasError = true
+                    }
+                    if (!hasError) {
+                        val km = PriceFormatter.cleanNumericString(mileageStr).toIntOrNull() ?: defaultMileage
+                        val cost = PriceFormatter.parseCost(costStr)
+                        val finalCatalogId = selectedCatalogId ?: CatalogData.findExactMatch(partName.trim())?.id
+                        val finalCategory = if (finalCatalogId != null) {
+                            CatalogData.findById(finalCatalogId)?.category ?: category
+                        } else {
+                            category
+                        }
+                        val finalIntervalKm = if (intervalType == ReminderIntervalType.TIME || intervalType == ReminderIntervalType.NONE) 0
+                            else PriceFormatter.cleanNumericString(intervalKmStr).toIntOrNull() ?: 5000
+                        val finalIntervalMonths = if (intervalType == ReminderIntervalType.MILEAGE || intervalType == ReminderIntervalType.NONE) 0
+                            else PriceFormatter.cleanNumericString(intervalMonthsStr).toIntOrNull() ?: 12
+
+                        onSave(
+                            partName.trim(),
+                            finalCatalogId,
+                            finalCategory,
+                            km,
+                            selectedTimestamp,
+                            cost,
+                            brand.trim(),
+                            center.trim(),
+                            notes.trim(),
+                            intervalType,
+                            finalIntervalKm,
+                            finalIntervalMonths
+                        )
+                    }
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+            ) {
+                Text(
+                    text = if (isEditMode) "ذخیره تغییرات" else "ثبت",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("انصراف", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    )
+
+    if (showDatePicker) {
+        PersianDatePickerDialog(
+            initialTimestamp = selectedTimestamp,
+            onDismiss = { showDatePicker = false },
+            onConfirm = { newTimestamp ->
+                selectedTimestamp = newTimestamp
+                showDatePicker = false
+                dateError = null
+            }
+        )
+    }
+
+    if (showDueDatePicker) {
+        val currentMonths = PriceFormatter.cleanNumericString(intervalMonthsStr).toIntOrNull() ?: 12
+        val currentDue = PersianDateHelper.addJalaliMonths(selectedTimestamp, currentMonths)
+        PersianDatePickerDialog(
+            initialTimestamp = currentDue,
+            onDismiss = { showDueDatePicker = false },
+            onConfirm = { pickedTimestamp ->
+                showDueDatePicker = false
+                val monthsDiff = PersianDateHelper.monthsBetween(selectedTimestamp, pickedTimestamp).coerceAtLeast(1)
+                intervalMonthsStr = monthsDiff.toString()
+            }
+        )
+    }
+}
